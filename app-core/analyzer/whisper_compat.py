@@ -84,7 +84,7 @@ def free_gpu():
     hard_free_gpu()
 
 
-def _run_align(raw_segments, audio, language, device, model_name=None):
+def _run_align(raw_segments, audio, language, device, model_name=None, preserve_segments=False):
     import whisperx
     key_suffix = model_name or language
     with gpu_model(f"wav2vec2:{key_suffix}:{device}") as held:
@@ -104,6 +104,15 @@ def _run_align(raw_segments, audio, language, device, model_name=None):
         )
         held.append(align_model)
 
+        def run(align_fn):
+            if preserve_segments:
+                # Keep failed or split lines separate without reloading the model.
+                return {"segment_results": [
+                    align_fn([segment], align_model, metadata, audio, device)
+                    for segment in raw_segments
+                ]}
+            return align_fn(raw_segments, align_model, metadata, audio, device)
+
         if get_align_backend() == "ctc":
             try:
                 import ctc_align
@@ -111,9 +120,7 @@ def _run_align(raw_segments, audio, language, device, model_name=None):
                     f"[nightingale:LOG] Aligning with torchaudio forced_align (ctc) on {device}",
                     flush=True,
                 )
-                return ctc_align.ctc_align(
-                    raw_segments, align_model, metadata, audio, device,
-                )
+                return run(ctc_align.ctc_align)
             except Exception as e:
                 if is_oom(e):
                     # Let align_with_fallback's OOM handling retry (it re-enters
@@ -126,17 +133,17 @@ def _run_align(raw_segments, audio, language, device, model_name=None):
                     flush=True,
                 )
 
-        return whisperx.align(raw_segments, align_model, metadata, audio, device)
+        return run(whisperx.align)
 
 
-def align_with_fallback(raw_segments, audio, language, device, pre_align_cleanup=None, model_name=None):
+def align_with_fallback(raw_segments, audio, language, device, pre_align_cleanup=None, model_name=None, preserve_segments=False):
     """Run whisperx.align with OOM fallback: retry after cleanup, then CPU.
 
     ``model_name`` overrides the default WhisperX align model for the given
     language (e.g. swap in slplab's hiragana CTC for ``ja``).
     """
     try:
-        return _run_align(raw_segments, audio, language, device, model_name=model_name)
+        return _run_align(raw_segments, audio, language, device, model_name=model_name, preserve_segments=preserve_segments)
     except Exception as e:
         if not is_oom(e):
             raise
@@ -152,11 +159,11 @@ def align_with_fallback(raw_segments, audio, language, device, pre_align_cleanup
         except Exception:
             pass
         try:
-            return _run_align(raw_segments, audio, language, device, model_name=model_name)
+            return _run_align(raw_segments, audio, language, device, model_name=model_name, preserve_segments=preserve_segments)
         except Exception as e2:
             if not is_oom(e2):
                 raise
             log_vram("oom:align_attempt2")
 
     print("[nightingale:LOG] Alignment OOM, falling back to CPU", flush=True)
-    return _run_align(raw_segments, audio, language, "cpu", model_name=model_name)
+    return _run_align(raw_segments, audio, language, "cpu", model_name=model_name, preserve_segments=preserve_segments)

@@ -1,14 +1,20 @@
 # Lyrics & Transcription
 
-Nightingale provides word-level synchronized lyrics through two sources.
+Nightingale uses saved lyrics first, then embedded lyrics, then LRCLIB, and finally speech transcription.
+
+## Embedded Lyrics
+
+Audio tags such as FLAC's `LYRICS` and `UNSYNCEDLYRICS` are checked before online lookup or transcription. Plain lyrics and text extracted from embedded LRC / Enhanced LRC are aligned against the vocals to produce word-level timing without speech transcription. Embedded LRC timestamps constrain each line's alignment to its own audio interval, keeping repeated choruses on the correct side of instrumental breaks. If a line cannot be aligned at word level, its existing line timing is retained.
+
+Saved edits take precedence over embedded lyrics. Missing, empty, or unreadable tags fall back to LRCLIB, then transcription. The explicit force-transcription action bypasses lyric lookup.
 
 ## LRCLIB
 
-[LRCLIB](https://lrclib.net) is queried first for existing synced lyrics. When a match is found, lyrics are used directly without needing transcription. This is faster and often more accurate for well-known songs.
+[LRCLIB](https://lrclib.net) is queried when saved or embedded lyrics are unavailable. When a match is found, its lyrics are aligned without needing transcription. This is faster and often more accurate for well-known songs.
 
 ## WhisperX Transcription
 
-When LRCLIB doesn't have lyrics for a song, Nightingale runs ASR over the isolated vocals to:
+When no existing lyrics are available for a song, Nightingale runs ASR over the isolated vocals to:
 
 1. **Transcribe** the audio into text
 2. **Align** each word to precise timestamps

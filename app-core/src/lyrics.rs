@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use lofty::{config::ParseOptions, file::TaggedFileExt, probe::Probe, tag::ItemKey};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use ts_rs::TS;
@@ -9,7 +10,7 @@ use crate::analyzer::{
 };
 use crate::cache::CacheDir;
 use crate::library_db;
-use crate::lrc::{self, ParsedLrc};
+use crate::lrc::{self, LyricsForAlignment, ParsedLrc};
 use crate::song::{Song, TranscriptSource, read_transcript_meta};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -314,16 +315,55 @@ pub(crate) fn write_lyrics_file(
     Ok(out)
 }
 
-pub(crate) fn fetch_lrclib_lyrics(song: &Song, cache: &CacheDir) -> Option<PathBuf> {
+fn read_embedded_lyrics(audio_path: &Path) -> Option<LyricsForAlignment> {
+    let options = ParseOptions::new()
+        .read_properties(false)
+        .read_cover_art(false);
+    let tagged = match Probe::open(audio_path).and_then(|probe| probe.options(options).read()) {
+        Ok(tagged) => tagged,
+        Err(_) => {
+            tracing::debug!("[lyrics] Embedded tags unavailable; trying lyric lookup");
+            return None;
+        }
+    };
+
+    tagged
+        .tags()
+        .iter()
+        .flat_map(|tag| {
+            tag.get_strings(ItemKey::Lyrics)
+                .chain(tag.get_strings(ItemKey::UnsyncLyrics))
+        })
+        .map(lrc::lyrics_for_alignment)
+        .find(|lyrics| !lyrics.lines.is_empty())
+}
+
+pub(crate) fn prepare_lyrics(
+    song: &Song,
+    audio_path: &Path,
+    cache: &CacheDir,
+) -> std::io::Result<Option<PathBuf>> {
     let existing = cache.lyrics_path(&song.file_hash);
     if existing.is_file() {
-        info!(
-            "[lrclib] Using existing lyrics file at {}",
-            existing.display()
-        );
-        return Some(existing);
+        return Ok(Some(existing));
     }
 
+    if cache.transcript_path(&song.file_hash).is_file() {
+        return Ok(None);
+    }
+
+    if let Some(lyrics) = read_embedded_lyrics(audio_path) {
+        let path = cache.lyrics_path(&song.file_hash);
+        let json = serde_json::to_vec_pretty(&lyrics).map_err(std::io::Error::other)?;
+        std::fs::write(&path, json)?;
+        info!("[lyrics] Using embedded lyrics for alignment");
+        return Ok(Some(path));
+    }
+
+    Ok(fetch_lrclib_lyrics(song, cache))
+}
+
+fn fetch_lrclib_lyrics(song: &Song, cache: &CacheDir) -> Option<PathBuf> {
     let candidates = lrclib_candidates(song);
     let pick = candidates.into_iter().next()?;
 

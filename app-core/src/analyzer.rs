@@ -16,7 +16,7 @@ use crate::config::AppConfig;
 use crate::error::NightingaleError;
 use crate::library_db;
 use crate::library_model::{LibraryMenuFilters, SongTarget};
-use crate::lyrics::{fetch_lrclib_lyrics, write_lyrics_file};
+use crate::lyrics::{prepare_lyrics, write_lyrics_file};
 use crate::song::{Song, SongOrigin, TranscriptSource, compute_file_hash, read_transcript_meta};
 use crate::source::{MediaSource, active_source};
 
@@ -878,11 +878,23 @@ fn process_song(initial_hash: &str, cache: &CacheDir) {
     }
 
     let config = AppConfig::load();
-    let skip_lrclib = stems_only || lock_unpoisoned(&FORCE_TRANSCRIBE).remove(file_hash);
-    let lyrics_path = if skip_lrclib {
+    let skip_lyrics = stems_only || lock_unpoisoned(&FORCE_TRANSCRIBE).remove(file_hash);
+    let lyrics_path = if skip_lyrics {
         None
     } else {
-        fetch_lrclib_lyrics(&song, cache)
+        match prepare_lyrics(&song, &local_path, cache) {
+            Ok(path) => path,
+            Err(error) => {
+                if !discard_cancelled_job(initial_hash, file_hash) {
+                    warn!(kind = ?error.kind(), "[analyzer] Failed to cache embedded lyrics");
+                    update_queue_status(
+                        file_hash,
+                        QueuedStatus::Failed("Failed to cache embedded lyrics".into()),
+                    );
+                }
+                return;
+            }
+        }
     };
 
     let mut cmd_json = serde_json::json!({

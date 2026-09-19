@@ -15,6 +15,8 @@ below.
 
 ### Fixes
 
+- Analysis now prefers embedded lyrics, including FLAC lyrics tags, before LRCLIB or speech transcription. Plain lyrics and text extracted from embedded LRC / Enhanced LRC run word-level alignment without speech transcription.
+- Embedded LRC line timestamps now constrain word alignment, preventing repeated choruses from collapsing into an earlier verse across instrumental breaks.
 - Analysis status sorting now orders ready songs by the transcript source shown in their status badge.
 
 ## [1.2.0] - 2026-09-02

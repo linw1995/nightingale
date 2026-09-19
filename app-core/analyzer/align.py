@@ -1,6 +1,7 @@
 """Lyrics alignment: align pre-fetched lyrics text to vocals audio using WhisperX."""
 
 import json
+import math
 import re
 
 import cjk
@@ -48,8 +49,10 @@ def align_lyrics(
     duration_secs = len(audio) / 16000
     print(f"[nightingale:LOG] Vocals audio loaded: {len(audio)} samples ({duration_secs:.1f}s)", flush=True)
 
-    progress(56, "Detecting vocal regions...")
-    vocal_start, vocal_end = detect_vocal_region(audio)
+    timed_lines = _read_line_bounds(lyrics_data.get("segments"), clean_lines, duration_secs)
+    if timed_lines is None:
+        progress(56, "Detecting vocal regions...")
+        vocal_start, vocal_end = detect_vocal_region(audio)
 
     a_device = align_device_for(device)
     c_type = compute_type_for(device)
@@ -68,6 +71,14 @@ def align_lyrics(
             language = detect_language_multiwindow(model, audio)
         print(f"[nightingale:LOG] Detected language: '{language}'", flush=True)
         progress(59, f"Detected language: {language}")
+
+    if timed_lines is not None:
+        progress(80, f"Aligning {len(clean_lines)} lines within LRC timestamps...")
+        segments = _align_timed_lines(
+            clean_lines, timed_lines, audio, language, a_device, pre_align_cleanup,
+        )
+        progress(90, f"Alignment complete: {len(segments)} segments, lang={language}")
+        return {"language": language, "segments": segments, "source": "lyrics"}
 
     progress(80, f"Final alignment from {vocal_start:.1f}s...")
 
@@ -122,6 +133,80 @@ def align_lyrics(
         print(f"[nightingale:LOG] Last segment: '{segments[-1]['text'][:100]}'", flush=True)
 
     return {"language": language, "segments": segments, "source": "lyrics"}
+
+
+def _read_line_bounds(segments, lines: list[str], duration_secs: float) -> list[dict] | None:
+    if not isinstance(segments, list) or not lines or len(segments) != len(lines):
+        return None
+    bounds = []
+    previous_start = 0.0
+    for segment, text in zip(segments, lines):
+        if not isinstance(segment, dict) or segment.get("text") != text:
+            return None
+        start, end = segment.get("start"), segment.get("end")
+        if not all(type(value) in (int, float) and math.isfinite(value) for value in (start, end)):
+            return None
+        end = min(end, duration_secs)
+        if not (previous_start <= start < end):
+            return None
+        bounds.append({"text": text, "start": start, "end": end})
+        previous_start = start
+    return bounds
+
+
+def _align_timed_lines(lines, bounds, audio, language, device, pre_align_cleanup):
+    import qwen_align
+
+    groups = None
+    qwen_used = False
+    if get_align_backend() == "qwen" and qwen_align.is_supported(language):
+        try:
+            result = qwen_align.qwen_align_with_cpu_fallback(
+                bounds, audio, language, pre_align_cleanup,
+            )
+            if len(result.get("segments", [])) == len(lines):
+                groups = [{"segments": [segment]} for segment in result["segments"]]
+                qwen_used = True
+        except Exception as error:
+            print(f"[nightingale:LOG] Timed Qwen alignment unavailable ({type(error).__name__}); using wav2vec2", flush=True)
+
+    token_pairs = (
+        [cjk.tokenize_for_alignment(line, language) for line in lines]
+        if cjk.is_cjk(language) and not qwen_used else None
+    )
+    if groups is None:
+        raw_segments = [
+            {**bound, "text": "".join(reading for _, reading in token_pairs[index]) if token_pairs is not None else line}
+            for index, (line, bound) in enumerate(zip(lines, bounds))
+        ]
+        result = align_with_fallback(
+            raw_segments, audio, cjk.align_lang_code(language), device, pre_align_cleanup,
+            model_name=cjk.align_model_for(language), preserve_segments=True,
+        )
+        groups = result["segment_results"]
+
+    segments = []
+    fallback_count = 0
+    for index, (line, bound, group) in enumerate(zip(lines, bounds, groups)):
+        if qwen_used:
+            mapped = _map_qwen_units_to_lines(group, [line], language)
+        elif token_pairs is not None:
+            mapped = _map_chars_to_lines_cjk(group, [line], [token_pairs[index]], language)
+        else:
+            mapped = _map_words_to_lines(group, [line])
+            if cjk.is_korean(language):
+                for segment in mapped:
+                    cjk.attach_reading(segment["words"], language)
+        if not mapped:
+            # Preserve the authored line timing when word alignment cannot place it.
+            mapped = [{**bound, "words": [{
+                "word": line, "start": bound["start"], "end": bound["end"], "estimated": True,
+            }]}]
+            fallback_count += 1
+        segments.extend(mapped)
+    print(f"[nightingale:LOG] Timed lyrics alignment: {len(lines)} lines, {fallback_count} line-timing fallbacks", flush=True)
+    return segments
+
 
 def _normalize(word: str) -> str:
     return re.sub(r"[^\w]", "", word).lower()
