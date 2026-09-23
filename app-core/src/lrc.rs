@@ -34,6 +34,13 @@ pub(crate) struct ParsedLrc {
     pub segments: Vec<LrcSegment>,
 }
 
+#[derive(Serialize)]
+pub(crate) struct LyricsForAlignment {
+    pub lines: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    segments: Vec<LrcSegment>,
+}
+
 /// Intermediate per-timestamp entry before segment ends are resolved.
 struct RawEntry {
     start: f64,
@@ -150,6 +157,34 @@ fn split_line(line: &str) -> (Vec<f64>, String, Option<f64>) {
     }
 
     (timestamps, rest.to_string(), offset_ms)
+}
+
+/// Keep LRC line bounds so repeated lyrics align to the intended occurrence.
+pub(crate) fn lyrics_for_alignment(text: &str) -> LyricsForAlignment {
+    let text = text.trim().trim_start_matches('\u{feff}');
+    if let Ok(parsed) = parse_lrc(text) {
+        return LyricsForAlignment {
+            lines: parsed
+                .segments
+                .iter()
+                .map(|segment| segment.text.clone())
+                .collect(),
+            segments: parsed.segments,
+        };
+    }
+
+    let lines = text
+        .lines()
+        .filter_map(|line| {
+            let (_, content, _) = split_line(line);
+            let content = content.trim();
+            (!content.is_empty()).then(|| content.to_string())
+        })
+        .collect();
+    LyricsForAlignment {
+        lines,
+        segments: Vec::new(),
+    }
 }
 
 /// Parse LRC / Enhanced LRC text into ordered segments. Returns an error when
