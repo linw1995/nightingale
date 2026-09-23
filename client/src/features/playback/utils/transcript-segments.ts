@@ -34,5 +34,7 @@ export function splitLongSegments(
       });
     }
   }
-  return result;
+  // Alignment can return estimated lines at time zero after later lines.
+  // Playback lookup relies on chronological order, including split chunks.
+  return result.toSorted((a, b) => a.start - b.start);
 }

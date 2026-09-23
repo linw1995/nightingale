@@ -7,35 +7,34 @@ export const SEGMENT_LINGER = 0.5;
 export const GAP_THRESHOLD_SEC = 3.5;
 export const BUBBLE_COUNTDOWN_SEC = 3.0;
 
-/** Finds the displayed segment, using `hint` to skip already-passed entries. */
-export function findCurrentSegment(segments: Segment[], time: number, hint: number): number {
-  const start = hint < segments.length && time >= segments[hint].start - LYRICS_LEAD ? hint : 0;
-
-  for (let i = start; i < segments.length; i++) {
-    if (time >= segments[i].end + SEGMENT_LINGER) {
-      const next = i + 1;
-
-      // Keep a finished line through short pauses until the next line's lead-in.
-      if (
-        next < segments.length &&
-        segments[next].start - segments[i].end < GAP_THRESHOLD_SEC &&
-        time < segments[next].start - LYRICS_LEAD
-      ) {
-        return i;
-      }
-
-      continue;
-    }
-
-    const next = i + 1;
-    if (next < segments.length && time >= segments[next].start - LYRICS_LEAD) {
-      return next;
-    }
-
-    return i;
+/** Finds the displayed segment in chronological order, independently of prior frames. */
+export function findCurrentSegment(segments: Segment[], time: number): number {
+  if (segments.length === 0) {
+    return 0;
   }
 
-  return Math.max(0, segments.length - 1);
+  let low = 0;
+  let high = segments.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (segments[mid].start - LYRICS_LEAD <= time) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  const current = low - 1;
+  if (current < 0) {
+    return 0;
+  }
+  const next = current + 1;
+  if (next >= segments.length || time <= segments[current].end + SEGMENT_LINGER) {
+    return current;
+  }
+
+  // Keep a finished line through short pauses until the next line's lead-in.
+  return segments[next].start - segments[current].end < GAP_THRESHOLD_SEC ? current : next;
 }
 
 export function computeLyricGapCaption(

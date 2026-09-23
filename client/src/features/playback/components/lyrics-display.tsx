@@ -246,11 +246,8 @@ function LyricsDisplayImpl(props: LyricsDisplayProps) {
   const { subscribe, getCurrentTime } = usePlaybackTransportActions();
   const animate = isPlaying && !paused;
 
-  const [segIdx, setSegIdx] = useState(() =>
-    segments.length === 0 ? 0 : findCurrentSegment(segments, getCurrentTime(), 0),
-  );
+  const [segIdx, setSegIdx] = useState(() => findCurrentSegment(segments, getCurrentTime()));
 
-  const hintRef = useRef(0);
   const renderedIdxRef = useRef(segIdx);
   const appliedIdxRef = useRef<number | null>(null);
   const applyRef = useRef<((time: number) => void) | null>(null);
@@ -268,9 +265,8 @@ function LyricsDisplayImpl(props: LyricsDisplayProps) {
     let cancelled = false;
 
     const apply = (time: number) => {
-      const idx = findCurrentSegment(segments, time, hintRef.current);
-      if (idx !== hintRef.current) {
-        hintRef.current = idx;
+      const idx = findCurrentSegment(segments, time);
+      if (idx !== renderedIdxRef.current) {
         setSegIdx(idx);
       }
 
