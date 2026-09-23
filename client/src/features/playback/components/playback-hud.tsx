@@ -334,7 +334,6 @@ function PlaybackHudImpl({
   const skipIntroRef = useRef<HTMLButtonElement>(null);
   const skipOutroRef = useRef<HTMLButtonElement>(null);
   const gapCaptionRef = useRef<HTMLOutputElement>(null);
-  const gapHintRef = useRef(0);
 
   const showPixabayCredit = isPixabayTheme(themeIndex);
   const hasTouch = useHasTouchInput();
@@ -350,8 +349,7 @@ function PlaybackHudImpl({
         el.style.display = 'none';
         return;
       }
-      const idx = findCurrentSegment(segments, time, gapHintRef.current);
-      gapHintRef.current = idx;
+      const idx = findCurrentSegment(segments, time);
       const caption = computeLyricGapCaption(segments, time, idx);
       if (typeof caption === 'string' && caption !== '') {
         el.textContent = caption;
@@ -361,7 +359,6 @@ function PlaybackHudImpl({
       }
     };
 
-    gapHintRef.current = 0;
     if (timerRef.current) {
       timerRef.current.textContent = `${formatTime(getCurrentTime())} / ${formatTime(duration)}`;
     }

@@ -27,10 +27,11 @@
     "preview": "vite preview",
     "quality": "pnpm quality:web && pnpm quality:rust && pnpm rules:check",
     "quality:rust": "pnpm format:rust:check && cd .. && cargo check --workspace --all-targets --all-features --locked && cd client && pnpm lint:rust",
-    "quality:web": "pnpm format:check && pnpm lint && pnpm typecheck",
+    "quality:web": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "rules:check": "cd .. && node client/node_modules/rulesync/dist/cli/index.js doctor --strict && node client/node_modules/rulesync/dist/cli/index.js generate --dry-run --silent",
     "rules:generate": "cd .. && node client/node_modules/rulesync/dist/cli/index.js generate",
     "tauri": "tauri",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
